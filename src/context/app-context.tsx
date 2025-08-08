@@ -11,6 +11,8 @@ interface AppContextType {
   activeListId: string | null;
   setActiveListId: (id: string | null) => void;
   addTaskList: (name: string) => void;
+  editTaskList: (id: string, newName: string) => void;
+  deleteTaskList: (id: string) => void;
   addTask: (description: string, listId: string) => void;
   toggleTaskCompletion: (id: string) => void;
   deleteTask: (id: string) => void;
@@ -41,8 +43,8 @@ const initialTasks: Task[] = [
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
   const { toast } = useToast();
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
-  const [taskLists, setTaskLists] = useState<TaskList[]>(initialTaskLists);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskLists, setTaskLists] = useState<TaskList[]>([]);
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [workDuration, setWorkDurationState] = useState(25);
@@ -52,16 +54,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsMounted(true);
     try {
       const storedTasks = localStorage.getItem("focusflow-tasks");
-      if (storedTasks) setTasks(JSON.parse(storedTasks));
+      const loadedTasks = storedTasks ? JSON.parse(storedTasks) : initialTasks;
+      setTasks(loadedTasks);
 
       const storedTaskLists = localStorage.getItem("focusflow-task-lists");
-      if (storedTaskLists) setTaskLists(JSON.parse(storedTaskLists));
+      const loadedTaskLists = storedTaskLists ? JSON.parse(storedTaskLists) : initialTaskLists;
+      setTaskLists(loadedTaskLists);
       
       const storedActiveListId = localStorage.getItem("focusflow-active-list-id");
-      if (storedActiveListId && storedActiveListId !== 'null') {
+      if (storedActiveListId && storedActiveListId !== 'null' && loadedTaskLists.some(l => l.id === storedActiveListId)) {
         setActiveListId(storedActiveListId);
-      } else if (taskLists.length > 0) {
-        setActiveListId(taskLists[0].id);
+      } else if (loadedTaskLists.length > 0) {
+        setActiveListId(loadedTaskLists[0].id);
       }
 
       const storedWorkDuration = localStorage.getItem("focusflow-work-duration");
@@ -72,7 +76,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       
       const storedActiveTask = localStorage.getItem("focusflow-active-task-id");
       if(storedActiveTask && storedActiveTask !== 'null') setActiveTaskId(storedActiveTask)
-      else if (tasks.length > 0) setActiveTaskId(tasks.find(t => t.listId === activeListId)?.id || null)
       
     } catch (error) {
       console.error("Failed to load from localStorage", error);
@@ -84,13 +87,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if(isMounted) {
       const currentListTasks = tasks.filter(t => t.listId === activeListId);
-      if(currentListTasks.length > 0 && !currentListTasks.find(t => t.id === activeTaskId)) {
-        setActiveTaskId(currentListTasks[0].id);
+      if (activeTaskId && !tasks.some(t => t.id === activeTaskId)) {
+         setActiveTaskId(null);
+      }
+
+      if (activeListId && currentListTasks.length > 0 && !currentListTasks.some(t => t.id === activeTaskId)) {
+        const firstIncomplete = currentListTasks.find(t => !t.completed);
+        setActiveTaskId(firstIncomplete ? firstIncomplete.id : currentListTasks[0].id);
       } else if (currentListTasks.length === 0) {
         setActiveTaskId(null);
       }
     }
-  }, [tasks, activeTaskId, activeListId, isMounted])
+  }, [tasks, activeTaskId, activeListId, isMounted]);
 
   useEffect(() => {
     if (isMounted) {
@@ -123,6 +131,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTaskLists((prev) => [...prev, newTaskList]);
     setActiveListId(newTaskList.id);
   }, [toast]);
+
+  const editTaskList = useCallback((id: string, newName: string) => {
+    if (!newName.trim()) {
+        toast({ title: "List name cannot be empty.", variant: "destructive" });
+        return;
+    }
+    setTaskLists(prev => prev.map(list => list.id === id ? { ...list, name: newName } : list));
+    toast({ title: "List updated successfully." });
+  }, [toast]);
+
+  const deleteTaskList = useCallback((id: string) => {
+    setTaskLists(prev => {
+        const newLists = prev.filter(list => list.id !== id);
+        if (activeListId === id) {
+            setActiveListId(newLists.length > 0 ? newLists[0].id : null);
+        }
+        return newLists;
+    });
+    setTasks(prev => prev.filter(task => task.listId !== id));
+    toast({ title: "List deleted successfully." });
+  }, [activeListId, toast]);
 
   const addTask = useCallback((description: string, listId: string) => {
     if (!description.trim()) {
@@ -178,6 +207,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         activeListId,
         setActiveListId,
         addTaskList,
+        editTaskList,
+        deleteTaskList,
         addTask,
         toggleTaskCompletion,
         deleteTask,

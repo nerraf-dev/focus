@@ -3,6 +3,7 @@
 import { StatsCards } from "@/components/dashboard/stats-cards";
 import { TimeChart } from "@/components/dashboard/time-chart";
 import { FocusInsights } from "@/components/dashboard/focus-insights";
+import { TaskListManager } from "@/components/dashboard/task-list-manager";
 import { useAppContext } from "@/context/app-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -39,6 +40,9 @@ export default function DashboardPage() {
         <div className="col-span-1 lg:col-span-3">
           <FocusInsights />
         </div>
+      </div>
+      <div>
+        <TaskListManager />
       </div>
     </div>
   );
