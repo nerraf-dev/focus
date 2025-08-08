@@ -58,8 +58,8 @@ const CircularProgress = ({
 
 export function TimerDisplay() {
   const { 
-    workDuration, setWorkDuration, 
-    breakDuration, setBreakDuration, 
+    workDuration, 
+    breakDuration, 
     activeTaskId, updateTaskTime, getTaskById
   } = useAppContext();
   const { toast } = useToast();
@@ -98,9 +98,6 @@ export function TimerDisplay() {
             setIsActive(false); // Auto-pause when switching
             return 0;
           }
-          if (mode === 'work' && activeTaskId) {
-            updateTaskTime(activeTaskId, 1);
-          }
           return prev - 1;
         });
       }, 1000);
@@ -109,7 +106,19 @@ export function TimerDisplay() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isActive, mode, activeTaskId, updateTaskTime, breakDuration, toast, workDuration]);
+  }, [isActive, mode, breakDuration, toast, workDuration]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isActive && mode === 'work' && activeTaskId) {
+        interval = setInterval(() => {
+            updateTaskTime(activeTaskId, 1);
+        }, 1000)
+    }
+    return () => {
+        if(interval) clearInterval(interval)
+    }
+  }, [isActive, mode, activeTaskId, updateTaskTime]);
 
   const toggleTimer = () => {
     if (mode === 'work' && !activeTaskId) {
