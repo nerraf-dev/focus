@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Trash2, CheckCircle, Circle } from "lucide-react";
+import { Plus, Trash2, CheckCircle, Circle, ListPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -9,15 +9,32 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppContext } from "@/context/app-context";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/lib/types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 function AddTaskForm() {
   const [description, setDescription] = useState("");
-  const { addTask } = useAppContext();
+  const { addTask, activeListId } = useAppContext();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    addTask(description);
-    setDescription("");
+    if (activeListId) {
+      addTask(description, activeListId);
+      setDescription("");
+    }
   };
 
   return (
@@ -26,8 +43,9 @@ function AddTaskForm() {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Add a new task..."
+        disabled={!activeListId}
       />
-      <Button type="submit" size="icon">
+      <Button type="submit" size="icon" disabled={!activeListId}>
         <Plus className="h-4 w-4" />
       </Button>
     </form>
@@ -73,10 +91,45 @@ function TaskItem({ task }: { task: Task }) {
   );
 }
 
+function AddTaskListDialog({ children }: { children: React.ReactNode }) {
+    const [open, setOpen] = useState(false);
+    const [name, setName] = useState("");
+    const { addTaskList } = useAppContext();
+
+    const handleSubmit = () => {
+        addTaskList(name);
+        setName("");
+        setOpen(false);
+    }
+
+    return (
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>{children}</DialogTrigger>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Create New Task List</DialogTitle>
+                </DialogHeader>
+                <div className="py-4">
+                    <Input 
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="List Name (e.g. 'Project X')"
+                    />
+                </div>
+                <DialogFooter>
+                    <Button onClick={handleSubmit}>Create List</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
 export function TaskManager() {
-  const { tasks } = useAppContext();
-  const completedTasks = tasks.filter(t => t.completed);
-  const incompleteTasks = tasks.filter(t => !t.completed);
+  const { tasks, taskLists, activeListId, setActiveListId } = useAppContext();
+  
+  const tasksInCurrentList = tasks.filter(t => t.listId === activeListId);
+  const completedTasks = tasksInCurrentList.filter(t => t.completed);
+  const incompleteTasks = tasksInCurrentList.filter(t => !t.completed);
 
   return (
     <Card className="flex flex-col h-full">
@@ -84,13 +137,33 @@ export function TaskManager() {
         <CardTitle>Tasks</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col gap-4 overflow-hidden">
+        <div className="flex gap-2">
+            <Select onValueChange={setActiveListId} value={activeListId || ""}>
+                <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Select a list" />
+                </SelectTrigger>
+                <SelectContent>
+                    {taskLists.map(list => (
+                        <SelectItem key={list.id} value={list.id}>{list.name}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+            <AddTaskListDialog>
+                <Button variant="outline" size="icon">
+                    <ListPlus />
+                </Button>
+            </AddTaskListDialog>
+        </div>
+
         <AddTaskForm />
         <ScrollArea className="flex-1">
           <div className="flex flex-col gap-2 pr-4">
             {incompleteTasks.length > 0 ? (
                 incompleteTasks.map((task) => <TaskItem key={task.id} task={task} />)
             ) : (
-                <p className="text-center text-muted-foreground py-4">No active tasks. Add one!</p>
+                <p className="text-center text-muted-foreground py-4">
+                    {activeListId ? "No active tasks in this list. Add one!" : "Select or create a list to start."}
+                </p>
             )}
             {completedTasks.length > 0 && (
                 <>
