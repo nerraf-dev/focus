@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Play, Pause, RefreshCw, SkipForward, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +21,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { useTimer } from "./use-timer";
 import { authenticatedFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import type { Task, Session } from "@/lib/types";
@@ -74,18 +75,17 @@ const CircularProgress = ({
 };
 
 export function TimerDisplay() {
+  // Manual refresh handler
+  const refreshTasksHandler = () => {
+    setRefreshTasks((prev) => prev + 1);
+  };
   const { toast } = useToast();
   const { user } = useAuth();
-  
+
   // Settings state (stored in localStorage)
   const [workDuration, setWorkDuration] = useState(25);
   const [breakDuration, setBreakDuration] = useState(5);
-  
-  // Timer state
-  const [mode, setMode] = useState<"work" | "break">("work");
-  const [secondsLeft, setSecondsLeft] = useState(workDuration * 60);
-  const [isActive, setIsActive] = useState(false);
-  
+
   // Task and session state
   const [activeTask, setActiveTask] = useState<DatabaseTask | null>(null);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
@@ -96,57 +96,45 @@ export function TimerDisplay() {
   useEffect(() => {
     const storedWorkDuration = localStorage.getItem("focusflow-work-duration");
     if (storedWorkDuration) setWorkDuration(JSON.parse(storedWorkDuration));
-
     const storedBreakDuration = localStorage.getItem("focusflow-break-duration");
     if (storedBreakDuration) setBreakDuration(JSON.parse(storedBreakDuration));
-
-    const storedActiveTaskId = localStorage.getItem("focusflow-active-task-id");
-    if (storedActiveTaskId) {
-      // We'll set this after tasks are loaded
-    }
   }, []);
 
-  // Load tasks
-  useEffect(() => {
-    const fetchTasks = async () => {
-      if (!user) return; // Don't fetch if not authenticated
-      
-      try {
-        const response = await authenticatedFetch('/api/tasks');
-        if (response.ok) {
-          const data = await response.json();
-          setTasks(data);
-          
-          // Try to restore previously selected task
-          const storedActiveTaskId = localStorage.getItem("focusflow-active-task-id");
-          if (storedActiveTaskId) {
-            const storedTask = data.find((task: DatabaseTask) => task.id === parseInt(storedActiveTaskId));
-            if (storedTask && !storedTask.completed) {
-              setActiveTask(storedTask);
-              return;
-            }
-          }
-          
-          // Set first incomplete task as active if none selected
-          if (!activeTask) {
-            const firstIncomplete = data.find((task: DatabaseTask) => !task.completed);
-            if (firstIncomplete) {
-              setActiveTask(firstIncomplete);
-            }
+  // Load tasks and restore active task
+  // Fetch tasks function for instant refresh
+  const fetchTasks = async () => {
+    if (!user) return;
+    try {
+      const response = await authenticatedFetch('/api/tasks');
+      if (response.ok) {
+        const data = await response.json();
+        setTasks(data);
+        // Restore active task from localStorage if possible
+        const storedActiveTaskId = localStorage.getItem("focusflow-active-task-id");
+        if (storedActiveTaskId) {
+          const foundTask = data.find((task: DatabaseTask) => task.id === parseInt(storedActiveTaskId));
+          if (foundTask && !foundTask.completed) {
+            setActiveTask(foundTask);
+            return;
           }
         }
-      } catch (error) {
-        console.error('Failed to fetch tasks:', error);
-        toast({ title: "Failed to load tasks", variant: "destructive" });
+        // If no active task, set first incomplete task
+        if (!activeTask) {
+          const firstIncomplete = data.find((task: DatabaseTask) => !task.completed);
+          if (firstIncomplete) setActiveTask(firstIncomplete);
+        }
       }
-    };
+    } catch (error) {
+      console.error('Failed to fetch tasks:', error);
+      toast({ title: "Failed to load tasks", variant: "destructive" });
+    }
+  };
 
+  useEffect(() => {
     fetchTasks();
-    
-    // Set up periodic refresh every 10 seconds to sync with task manager
     const interval = setInterval(fetchTasks, 10000);
     return () => clearInterval(interval);
-  }, [toast, refreshTasks, user]); // Include user in dependencies
+  }, [toast, refreshTasks, user]);
 
   // Save active task to localStorage when it changes
   useEffect(() => {
@@ -157,18 +145,24 @@ export function TimerDisplay() {
     }
   }, [activeTask]);
 
-  // Reset timer when mode or duration changes
-  const resetTimer = useCallback(() => {
-    setIsActive(false);
-    setSecondsLeft(mode === "work" ? workDuration * 60 : breakDuration * 60);
-    if (currentSession && mode === "work") {
-      endSession();
-    }
-  }, [mode, workDuration, breakDuration, currentSession]);
-  
-  useEffect(() => {
-    resetTimer();
-  }, [workDuration, breakDuration, mode, resetTimer]);
+  // Use the custom timer hook
+  const {
+    mode,
+    setMode,
+    secondsLeft,
+    setSecondsLeft,
+    isActive,
+    setIsActive,
+    resetTimer,
+    endSession,
+  } = useTimer({
+    workDuration,
+    breakDuration,
+    activeTask,
+    currentSession,
+    setCurrentSession,
+    toast,
+  });
 
   // Start a new session
   const startSession = async (taskId: number) => {
@@ -177,7 +171,6 @@ export function TimerDisplay() {
         method: 'POST',
         body: JSON.stringify({ taskId })
       });
-
       if (response.ok) {
         const session = await response.json();
         setCurrentSession(session);
@@ -190,76 +183,22 @@ export function TimerDisplay() {
     }
   };
 
-  // End current session
-  const endSession = async () => {
-    if (!currentSession) return;
-
-    try {
-      const totalSeconds = (mode === "work" ? workDuration : breakDuration) * 60;
-      const sessionDuration = totalSeconds - secondsLeft;
-      
-      await authenticatedFetch(`/api/sessions/${currentSession.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ 
-          endedAt: new Date().toISOString(),
-          duration: sessionDuration
-        })
-      });
-
-      setCurrentSession(null);
-    } catch (error) {
-      console.error('Failed to end session:', error);
-    }
-  };
-
-  // Main timer effect
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-
-    if (isActive) {
-      interval = setInterval(() => {
-        setSecondsLeft((prev) => {
-          if (prev <= 1) {
-            if (mode === "work") {
-              endSession(); // End work session
-              setMode("break");
-              setSecondsLeft(breakDuration * 60);
-              toast({ title: "Time for a break!", description: "Great work session. Relax for a bit." });
-            } else {
-              setMode("work");
-              setSecondsLeft(workDuration * 60);
-              toast({ title: "Back to work!", description: "Break's over. Let's get focused." });
-            }
-            setIsActive(false); // Auto-pause when switching
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isActive, mode, breakDuration, workDuration, toast, currentSession, secondsLeft]);
-
   const toggleTimer = async () => {
     if (mode === 'work' && !activeTask) {
       toast({ title: "No active task", description: "Please select a task to start the timer.", variant: "destructive" });
       return;
     }
-
     if (!isActive && mode === 'work' && activeTask && !currentSession) {
-      // Starting work timer - create session
       await startSession(activeTask.id);
+      setIsActive(true); // Explicitly start timer
     } else if (isActive && mode === 'work' && currentSession) {
-      // Pausing work timer - end session
       await endSession();
+      setIsActive(false); // Explicitly stop timer
+    } else {
+      setIsActive(!isActive); // Toggle for break mode
     }
-
-    setIsActive(!isActive);
   };
-  
+
   const skipToNext = async () => {
     if (currentSession && mode === 'work') {
       await endSession();
@@ -304,7 +243,7 @@ export function TimerDisplay() {
           </div>
         </div>
         
-        {/* Task Selection */}
+        {/* Task Selection + Manual Refresh */}
         {mode === "work" && (
           <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -316,6 +255,9 @@ export function TimerDisplay() {
               activeTask={activeTask}
               onTaskSelect={setActiveTask}
             />
+            <Button variant="outline" size="sm" className="ml-2" onClick={refreshTasksHandler}>
+              Refresh
+            </Button>
           </div>
         )}
       </CardHeader>
