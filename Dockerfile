@@ -8,11 +8,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install --legacy-peer-deps \
-    && npm install @genkit-ai/firebase @opentelemetry/exporter-jaeger --save
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY . .
+
+# Generate Prisma client
+RUN npx prisma generate
 
 # Build the Next.js app
 RUN npm run build
@@ -23,9 +25,17 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=4000
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
 # Copy built app from builder stage
-COPY --from=builder /app ./
+COPY --from=builder --chown=nextjs:nodejs /app ./
+
+# Switch to non-root user
+USER nextjs
 
 # Expose port 4000
 EXPOSE 4000
