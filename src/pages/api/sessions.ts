@@ -3,11 +3,29 @@ import prisma from '../../lib/prisma';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
+    // Get user ID from request headers
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
     if (req.method === 'GET') {
       // Get all sessions for a task
       const { taskId } = req.query;
       
       if (taskId) {
+        // Verify the task belongs to the user
+        const task = await prisma.task.findFirst({
+          where: { 
+            id: parseInt(taskId as string),
+            userId: Number(userId)
+          }
+        });
+        
+        if (!task) {
+          return res.status(404).json({ error: 'Task not found' });
+        }
+
         const sessions = await prisma.session.findMany({
           where: {
             taskId: parseInt(taskId as string)
@@ -18,13 +36,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
         return res.status(200).json(sessions);
       } else {
-        // Get all sessions for user (userId = 1 for now)
+        // Get all sessions for user's tasks
         const sessions = await prisma.session.findMany({
           include: {
             task: {
               include: {
                 list: true
               }
+            }
+          },
+          where: {
+            task: {
+              userId: Number(userId)
             }
           },
           orderBy: {
@@ -43,9 +66,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ error: 'taskId is required' });
       }
 
-      // Check if task exists
-      const task = await prisma.task.findUnique({
-        where: { id: parseInt(taskId) }
+      // Check if task exists and belongs to user
+      const task = await prisma.task.findFirst({
+        where: { 
+          id: parseInt(taskId),
+          userId: Number(userId)
+        }
       });
 
       if (!task) {

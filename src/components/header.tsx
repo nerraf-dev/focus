@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, LayoutDashboard, Timer as TimerIcon, LogIn, LogOut, User } from "lucide-react";
+import { BrainCircuit, LayoutDashboard, Timer as TimerIcon, LogIn, LogOut, User, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const NavLink = ({ href, children, icon: Icon }: { href: string; children: React.ReactNode; icon: React.ElementType }) => {
   const pathname = usePathname();
@@ -36,9 +38,85 @@ const NavLink = ({ href, children, icon: Icon }: { href: string; children: React
 
 export function Header() {
   const { user, logout, loading } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6">
+      {/* Mobile Navigation */}
+      <div className="flex items-center gap-4 md:hidden w-full">
+        <Link href="/" className="flex items-center gap-2 text-lg font-semibold">
+          <BrainCircuit className="h-6 w-6 text-primary" />
+          <span className="font-headline text-xl">FocusFlow</span>
+        </Link>
+        <div className="flex-1" />
+        
+        {user && (
+          <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="icon">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Toggle navigation menu</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right">
+              <nav className="grid gap-6 text-lg font-medium">
+                <Link
+                  href="/"
+                  className="flex items-center gap-2 text-lg font-semibold"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <BrainCircuit className="h-6 w-6 text-primary" />
+                  <span className="font-headline text-xl">FocusFlow</span>
+                </Link>
+                <Link
+                  href="/"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <TimerIcon className="h-4 w-4" />
+                  Timer
+                </Link>
+                <Link
+                  href="/dashboard"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  Dashboard
+                </Link>
+                <div className="border-t pt-4">
+                  <div className="flex flex-col space-y-2">
+                    <p className="text-sm font-medium">{user.name}</p>
+                    <p className="text-xs text-muted-foreground">{user.email}</p>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        logout();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="justify-start"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Log out
+                    </Button>
+                  </div>
+                </div>
+              </nav>
+            </SheetContent>
+          </Sheet>
+        )}
+
+        {!user && !loading && (
+          <Link href="/auth/signin">
+            <Button variant="default" size="sm">
+              <LogIn className="mr-2 h-4 w-4" />
+              Sign In
+            </Button>
+          </Link>
+        )}
+      </div>
+
+      {/* Desktop Navigation */}
       <nav className="hidden w-full flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
         <Link
           href="/"
@@ -102,7 +180,7 @@ export function Header() {
           </Link>
         )}
       </nav>
-      {/* Mobile Nav could be added here with a Sheet component */}
+      {/* Mobile menu now handled above */}
     </header>
   );
 }

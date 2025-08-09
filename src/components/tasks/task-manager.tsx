@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { authenticatedFetch } from "@/lib/api";
+import { useAuth } from "@/context/auth-context";
 import {
   Select,
   SelectContent,
@@ -43,9 +45,8 @@ function AddTaskForm({ activeListId, onTaskAdded }: { activeListId: number | nul
     if (!activeListId || !description.trim()) return;
 
     try {
-      const response = await fetch('/api/tasks', {
+      const response = await authenticatedFetch('/api/tasks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: description, listId: activeListId }),
       });
       const task = await response.json();
@@ -101,9 +102,8 @@ function AddTaskListDialog({ children, onListAdded }: { children: React.ReactNod
         if (!name.trim()) return;
         
         try {
-            const response = await fetch('/api/task-lists', {
+            const response = await authenticatedFetch('/api/task-lists', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name }),
             });
             const list = await response.json();
@@ -138,6 +138,7 @@ function AddTaskListDialog({ children, onListAdded }: { children: React.ReactNod
 }
 
 export function TaskManager() {
+  const { user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskLists, setTaskLists] = useState<TaskList[]>([]);
   const [activeListId, setActiveListId] = useState<number | null>(null);
@@ -145,8 +146,10 @@ export function TaskManager() {
   // Load task lists on mount
   useEffect(() => {
     const fetchLists = async () => {
+      if (!user) return; // Don't fetch if not authenticated
+      
       try {
-        const response = await fetch('/api/task-lists');
+        const response = await authenticatedFetch('/api/task-lists');
         const lists = await response.json();
         setTaskLists(lists);
         if (lists.length > 0 && !activeListId) {
@@ -157,14 +160,14 @@ export function TaskManager() {
       }
     };
     fetchLists();
-  }, [activeListId]);
+  }, [activeListId, user]); // Include user in dependencies
 
   // Load tasks when active list changes
   useEffect(() => {
     const fetchTasks = async () => {
-      if (!activeListId) return;
+      if (!activeListId || !user) return; // Don't fetch if not authenticated or no active list
       try {
-        const response = await fetch(`/api/tasks?listId=${activeListId}`);
+        const response = await authenticatedFetch(`/api/tasks?listId=${activeListId}`);
         const tasks = await response.json();
         setTasks(tasks);
       } catch (error) {
@@ -172,7 +175,7 @@ export function TaskManager() {
       }
     };
     fetchTasks();
-  }, [activeListId]);
+  }, [activeListId, user]); // Include user in dependencies
 
   const handleTaskAdded = (task: Task) => {
     setTasks(prev => [...prev, task]);
@@ -188,9 +191,8 @@ export function TaskManager() {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
 
-      const response = await fetch(`/api/tasks/${taskId}`, {
+      const response = await authenticatedFetch(`/api/tasks/${taskId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed: !task.completed }),
       });
       
@@ -203,7 +205,7 @@ export function TaskManager() {
 
   const handleDeleteTask = async (taskId: number) => {
     try {
-      await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+      await authenticatedFetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
       setTasks(prev => prev.filter(t => t.id !== taskId));
     } catch (error) {
       console.error('Error deleting task:', error);

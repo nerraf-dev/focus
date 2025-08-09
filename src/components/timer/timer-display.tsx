@@ -21,6 +21,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { authenticatedFetch } from "@/lib/api";
+import { useAuth } from "@/context/auth-context";
 import type { Task, Session } from "@/lib/types";
 
 // Define compatible task type that matches database schema
@@ -73,6 +75,7 @@ const CircularProgress = ({
 
 export function TimerDisplay() {
   const { toast } = useToast();
+  const { user } = useAuth();
   
   // Settings state (stored in localStorage)
   const [workDuration, setWorkDuration] = useState(25);
@@ -106,8 +109,10 @@ export function TimerDisplay() {
   // Load tasks
   useEffect(() => {
     const fetchTasks = async () => {
+      if (!user) return; // Don't fetch if not authenticated
+      
       try {
-        const response = await fetch('/api/tasks');
+        const response = await authenticatedFetch('/api/tasks');
         if (response.ok) {
           const data = await response.json();
           setTasks(data);
@@ -141,7 +146,7 @@ export function TimerDisplay() {
     // Set up periodic refresh every 10 seconds to sync with task manager
     const interval = setInterval(fetchTasks, 10000);
     return () => clearInterval(interval);
-  }, [toast, refreshTasks]); // refreshTasks allows manual refresh
+  }, [toast, refreshTasks, user]); // Include user in dependencies
 
   // Save active task to localStorage when it changes
   useEffect(() => {
@@ -168,9 +173,8 @@ export function TimerDisplay() {
   // Start a new session
   const startSession = async (taskId: number) => {
     try {
-      const response = await fetch('/api/sessions', {
+      const response = await authenticatedFetch('/api/sessions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId })
       });
 
@@ -194,9 +198,8 @@ export function TimerDisplay() {
       const totalSeconds = (mode === "work" ? workDuration : breakDuration) * 60;
       const sessionDuration = totalSeconds - secondsLeft;
       
-      await fetch(`/api/sessions/${currentSession.id}`, {
+      await authenticatedFetch(`/api/sessions/${currentSession.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           endedAt: new Date().toISOString(),
           duration: sessionDuration
@@ -286,23 +289,35 @@ export function TimerDisplay() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-2xl">
-          {mode === "work" ? "Focus Session" : "Break Time"}
-        </CardTitle>
-        <div className="flex gap-2">
-          <TaskSelectorDialog 
-            tasks={tasks}
-            activeTask={activeTask}
-            onTaskSelect={setActiveTask}
-          />
-          <TimerSettingsDialog 
-            workDuration={workDuration}
-            breakDuration={breakDuration}
-            onWorkDurationChange={handleWorkDurationChange}
-            onBreakDurationChange={handleBreakDurationChange}
-          />
+      <CardHeader className="flex flex-col gap-4">
+        <div className="flex flex-row items-center justify-between">
+          <CardTitle className="text-2xl">
+            {mode === "work" ? "Focus Session" : "Break Time"}
+          </CardTitle>
+          <div className="flex gap-2">
+            <TimerSettingsDialog 
+              workDuration={workDuration}
+              breakDuration={breakDuration}
+              onWorkDurationChange={handleWorkDurationChange}
+              onBreakDurationChange={handleBreakDurationChange}
+            />
+          </div>
         </div>
+        
+        {/* Task Selection */}
+        {mode === "work" && (
+          <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="h-2 w-2 bg-primary rounded-full"></div>
+              <span>Active Task:</span>
+            </div>
+            <TaskSelectorDialog 
+              tasks={tasks}
+              activeTask={activeTask}
+              onTaskSelect={setActiveTask}
+            />
+          </div>
+        )}
       </CardHeader>
       <CardContent className="flex flex-col items-center justify-center gap-8 pt-6">
         <div className="relative">
@@ -311,9 +326,11 @@ export function TimerDisplay() {
             <span className="font-mono text-7xl font-bold tracking-tighter">
               {formatTime(secondsLeft)}
             </span>
-            <p className="text-sm text-muted-foreground truncate max-w-[200px]">
-              {mode === 'work' ? (activeTask?.title || "No active task") : 'Relax and recharge'}
-            </p>
+            {mode === 'break' && (
+              <p className="text-sm text-muted-foreground">
+                Relax and recharge
+              </p>
+            )}
             {currentSession && mode === 'work' && (
               <p className="text-xs text-muted-foreground mt-1">
                 Session in progress
@@ -349,44 +366,39 @@ function TaskSelectorDialog({
 }) {
   const incompleteTasks = tasks.filter(task => !task.completed);
 
+  if (incompleteTasks.length === 0) {
+    return (
+      <span className="text-sm text-muted-foreground italic">
+        No tasks available - create some tasks first
+      </span>
+    );
+  }
+
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm">
-          {activeTask ? activeTask.title.slice(0, 20) + "..." : "Select Task"}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>Select Active Task</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <Select
-            value={activeTask?.id.toString() || ""}
-            onValueChange={(value) => {
-              const task = tasks.find(t => t.id === parseInt(value));
-              onTaskSelect(task || null);
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Choose a task to focus on" />
-            </SelectTrigger>
-            <SelectContent>
-              {incompleteTasks.map((task) => (
-                <SelectItem key={task.id} value={task.id.toString()}>
-                  {task.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {incompleteTasks.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center">
-              No incomplete tasks available. Create some tasks first.
-            </p>
+    <Select
+      value={activeTask?.id.toString() || ""}
+      onValueChange={(value) => {
+        const task = tasks.find(t => t.id === parseInt(value));
+        onTaskSelect(task || null);
+      }}
+    >
+      <SelectTrigger className="w-auto min-w-[200px] h-8 text-sm border-none bg-transparent hover:bg-muted/50 focus:ring-1">
+        <SelectValue placeholder="Choose a task to focus on">
+          {activeTask ? (
+            <span className="font-medium">{activeTask.title}</span>
+          ) : (
+            <span className="text-muted-foreground">Choose a task to focus on</span>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {incompleteTasks.map((task) => (
+          <SelectItem key={task.id} value={task.id.toString()}>
+            <span className="truncate max-w-[300px]">{task.title}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

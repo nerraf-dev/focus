@@ -5,10 +5,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { id } = req.query
   const taskId = parseInt(id as string)
 
+  // Get user ID from request headers
+  const userId = req.headers['x-user-id'];
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
   if (req.method === 'PUT') {
-    // Update task (toggle completion)
+    // Update task (toggle completion) - verify ownership
     const { completed } = req.body
     try {
+      // First verify the task belongs to the user
+      const existingTask = await prisma.task.findFirst({
+        where: { 
+          id: taskId,
+          userId: Number(userId)
+        }
+      });
+
+      if (!existingTask) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
       const task = await prisma.task.update({
         where: { id: taskId },
         data: { completed }
@@ -18,8 +36,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.status(500).json({ error: 'Failed to update task' })
     }
   } else if (req.method === 'DELETE') {
-    // Delete task
+    // Delete task - verify ownership
     try {
+      // First verify the task belongs to the user
+      const existingTask = await prisma.task.findFirst({
+        where: { 
+          id: taskId,
+          userId: Number(userId)
+        }
+      });
+
+      if (!existingTask) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
       await prisma.task.delete({
         where: { id: taskId }
       })

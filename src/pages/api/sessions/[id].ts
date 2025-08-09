@@ -9,11 +9,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
+  // Get user ID from request headers
+  const userId = req.headers['x-user-id'];
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
   try {
     if (req.method === 'PUT') {
-      // Update/end a session
+      // Update/end a session - verify ownership through task
       const { endedAt, duration } = req.body;
       
+      // First verify the session belongs to a task owned by the user
+      const existingSession = await prisma.session.findFirst({
+        where: {
+          id: sessionId,
+          task: {
+            userId: Number(userId)
+          }
+        }
+      });
+
+      if (!existingSession) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
       const updatedSession = await prisma.session.update({
         where: { id: sessionId },
         data: {
@@ -26,7 +46,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (req.method === 'DELETE') {
-      // Delete a session
+      // Delete a session - verify ownership through task
+      const existingSession = await prisma.session.findFirst({
+        where: {
+          id: sessionId,
+          task: {
+            userId: Number(userId)
+          }
+        }
+      });
+
+      if (!existingSession) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
       await prisma.session.delete({
         where: { id: sessionId }
       });
