@@ -10,3 +10,11 @@ export interface TaskList {
   id: string;
   name: string;
 }
+
+export interface Session {
+  id: number;
+  startedAt: string;
+  endedAt?: string;
+  duration?: number; // in seconds
+  taskId: number;
+}

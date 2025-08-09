@@ -11,10 +11,25 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { useAppContext } from "@/context/app-context";
 import { useToast } from "@/hooks/use-toast";
+import type { Task, Session } from "@/lib/types";
+
+// Define compatible task type that matches database schema
+interface DatabaseTask {
+  id: number;
+  title: string;
+  completed: boolean;
+  description?: string;
+}
 
 const CircularProgress = ({
   progress,
@@ -57,28 +72,144 @@ const CircularProgress = ({
 };
 
 export function TimerDisplay() {
-  const { 
-    workDuration, 
-    breakDuration, 
-    activeTaskId, updateTaskTime, getTaskById
-  } = useAppContext();
   const { toast } = useToast();
-
+  
+  // Settings state (stored in localStorage)
+  const [workDuration, setWorkDuration] = useState(25);
+  const [breakDuration, setBreakDuration] = useState(5);
+  
+  // Timer state
   const [mode, setMode] = useState<"work" | "break">("work");
   const [secondsLeft, setSecondsLeft] = useState(workDuration * 60);
   const [isActive, setIsActive] = useState(false);
+  
+  // Task and session state
+  const [activeTask, setActiveTask] = useState<DatabaseTask | null>(null);
+  const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const [tasks, setTasks] = useState<DatabaseTask[]>([]);
+  const [refreshTasks, setRefreshTasks] = useState(0); // Trigger for refreshing tasks
 
-  const activeTask = activeTaskId ? getTaskById(activeTaskId) : null;
+  // Load settings from localStorage
+  useEffect(() => {
+    const storedWorkDuration = localStorage.getItem("focusflow-work-duration");
+    if (storedWorkDuration) setWorkDuration(JSON.parse(storedWorkDuration));
 
+    const storedBreakDuration = localStorage.getItem("focusflow-break-duration");
+    if (storedBreakDuration) setBreakDuration(JSON.parse(storedBreakDuration));
+
+    const storedActiveTaskId = localStorage.getItem("focusflow-active-task-id");
+    if (storedActiveTaskId) {
+      // We'll set this after tasks are loaded
+    }
+  }, []);
+
+  // Load tasks
+  useEffect(() => {
+    const fetchTasks = async () => {
+      try {
+        const response = await fetch('/api/tasks');
+        if (response.ok) {
+          const data = await response.json();
+          setTasks(data);
+          
+          // Try to restore previously selected task
+          const storedActiveTaskId = localStorage.getItem("focusflow-active-task-id");
+          if (storedActiveTaskId) {
+            const storedTask = data.find((task: DatabaseTask) => task.id === parseInt(storedActiveTaskId));
+            if (storedTask && !storedTask.completed) {
+              setActiveTask(storedTask);
+              return;
+            }
+          }
+          
+          // Set first incomplete task as active if none selected
+          if (!activeTask) {
+            const firstIncomplete = data.find((task: DatabaseTask) => !task.completed);
+            if (firstIncomplete) {
+              setActiveTask(firstIncomplete);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch tasks:', error);
+        toast({ title: "Failed to load tasks", variant: "destructive" });
+      }
+    };
+
+    fetchTasks();
+    
+    // Set up periodic refresh every 10 seconds to sync with task manager
+    const interval = setInterval(fetchTasks, 10000);
+    return () => clearInterval(interval);
+  }, [toast, refreshTasks]); // refreshTasks allows manual refresh
+
+  // Save active task to localStorage when it changes
+  useEffect(() => {
+    if (activeTask) {
+      localStorage.setItem("focusflow-active-task-id", activeTask.id.toString());
+    } else {
+      localStorage.removeItem("focusflow-active-task-id");
+    }
+  }, [activeTask]);
+
+  // Reset timer when mode or duration changes
   const resetTimer = useCallback(() => {
     setIsActive(false);
     setSecondsLeft(mode === "work" ? workDuration * 60 : breakDuration * 60);
-  }, [mode, workDuration, breakDuration]);
+    if (currentSession && mode === "work") {
+      endSession();
+    }
+  }, [mode, workDuration, breakDuration, currentSession]);
   
   useEffect(() => {
     resetTimer();
   }, [workDuration, breakDuration, mode, resetTimer]);
-  
+
+  // Start a new session
+  const startSession = async (taskId: number) => {
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId })
+      });
+
+      if (response.ok) {
+        const session = await response.json();
+        setCurrentSession(session);
+      } else {
+        toast({ title: "Failed to start session", variant: "destructive" });
+      }
+    } catch (error) {
+      console.error('Failed to start session:', error);
+      toast({ title: "Failed to start session", variant: "destructive" });
+    }
+  };
+
+  // End current session
+  const endSession = async () => {
+    if (!currentSession) return;
+
+    try {
+      const totalSeconds = (mode === "work" ? workDuration : breakDuration) * 60;
+      const sessionDuration = totalSeconds - secondsLeft;
+      
+      await fetch(`/api/sessions/${currentSession.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          endedAt: new Date().toISOString(),
+          duration: sessionDuration
+        })
+      });
+
+      setCurrentSession(null);
+    } catch (error) {
+      console.error('Failed to end session:', error);
+    }
+  };
+
+  // Main timer effect
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
 
@@ -87,6 +218,7 @@ export function TimerDisplay() {
         setSecondsLeft((prev) => {
           if (prev <= 1) {
             if (mode === "work") {
+              endSession(); // End work session
               setMode("break");
               setSecondsLeft(breakDuration * 60);
               toast({ title: "Time for a break!", description: "Great work session. Relax for a bit." });
@@ -106,32 +238,42 @@ export function TimerDisplay() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isActive, mode, breakDuration, toast, workDuration]);
+  }, [isActive, mode, breakDuration, workDuration, toast, currentSession, secondsLeft]);
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isActive && mode === 'work' && activeTaskId) {
-        interval = setInterval(() => {
-            updateTaskTime(activeTaskId, 1);
-        }, 1000)
+  const toggleTimer = async () => {
+    if (mode === 'work' && !activeTask) {
+      toast({ title: "No active task", description: "Please select a task to start the timer.", variant: "destructive" });
+      return;
     }
-    return () => {
-        if(interval) clearInterval(interval)
-    }
-  }, [isActive, mode, activeTaskId, updateTaskTime]);
 
-  const toggleTimer = () => {
-    if (mode === 'work' && !activeTaskId) {
-        toast({ title: "No active task", description: "Please select a task to start the timer.", variant: "destructive" });
-        return;
+    if (!isActive && mode === 'work' && activeTask && !currentSession) {
+      // Starting work timer - create session
+      await startSession(activeTask.id);
+    } else if (isActive && mode === 'work' && currentSession) {
+      // Pausing work timer - end session
+      await endSession();
     }
+
     setIsActive(!isActive);
   };
   
-  const skipToNext = () => {
+  const skipToNext = async () => {
+    if (currentSession && mode === 'work') {
+      await endSession();
+    }
     setMode(current => current === 'work' ? 'break' : 'work');
     setIsActive(false);
-  }
+  };
+
+  const handleWorkDurationChange = (duration: number) => {
+    setWorkDuration(duration);
+    localStorage.setItem("focusflow-work-duration", JSON.stringify(duration));
+  };
+
+  const handleBreakDurationChange = (duration: number) => {
+    setBreakDuration(duration);
+    localStorage.setItem("focusflow-break-duration", JSON.stringify(duration));
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -148,7 +290,19 @@ export function TimerDisplay() {
         <CardTitle className="text-2xl">
           {mode === "work" ? "Focus Session" : "Break Time"}
         </CardTitle>
-        <TimerSettingsDialog />
+        <div className="flex gap-2">
+          <TaskSelectorDialog 
+            tasks={tasks}
+            activeTask={activeTask}
+            onTaskSelect={setActiveTask}
+          />
+          <TimerSettingsDialog 
+            workDuration={workDuration}
+            breakDuration={breakDuration}
+            onWorkDurationChange={handleWorkDurationChange}
+            onBreakDurationChange={handleBreakDurationChange}
+          />
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col items-center justify-center gap-8 pt-6">
         <div className="relative">
@@ -158,8 +312,13 @@ export function TimerDisplay() {
               {formatTime(secondsLeft)}
             </span>
             <p className="text-sm text-muted-foreground truncate max-w-[200px]">
-              {mode === 'work' ? (activeTask?.description || "No active task") : 'Relax and recharge'}
+              {mode === 'work' ? (activeTask?.title || "No active task") : 'Relax and recharge'}
             </p>
+            {currentSession && mode === 'work' && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Session in progress
+              </p>
+            )}
           </div>
         </div>
 
@@ -179,9 +338,69 @@ export function TimerDisplay() {
   );
 }
 
-function TimerSettingsDialog() {
-  const { workDuration, setWorkDuration, breakDuration, setBreakDuration } = useAppContext();
+function TaskSelectorDialog({
+  tasks,
+  activeTask,
+  onTaskSelect,
+}: {
+  tasks: DatabaseTask[];
+  activeTask: DatabaseTask | null;
+  onTaskSelect: (task: DatabaseTask | null) => void;
+}) {
+  const incompleteTasks = tasks.filter(task => !task.completed);
 
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          {activeTask ? activeTask.title.slice(0, 20) + "..." : "Select Task"}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Select Active Task</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <Select
+            value={activeTask?.id.toString() || ""}
+            onValueChange={(value) => {
+              const task = tasks.find(t => t.id === parseInt(value));
+              onTaskSelect(task || null);
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Choose a task to focus on" />
+            </SelectTrigger>
+            <SelectContent>
+              {incompleteTasks.map((task) => (
+                <SelectItem key={task.id} value={task.id.toString()}>
+                  {task.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {incompleteTasks.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center">
+              No incomplete tasks available. Create some tasks first.
+            </p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TimerSettingsDialog({
+  workDuration,
+  breakDuration,
+  onWorkDurationChange,
+  onBreakDurationChange,
+}: {
+  workDuration: number;
+  breakDuration: number;
+  onWorkDurationChange: (duration: number) => void;
+  onBreakDurationChange: (duration: number) => void;
+}) {
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -196,25 +415,25 @@ function TimerSettingsDialog() {
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="work-duration" className="text-right">
-              Work
+              Work (min)
             </Label>
             <Input
               id="work-duration"
               type="number"
               value={workDuration}
-              onChange={(e) => setWorkDuration(Number(e.target.value))}
+              onChange={(e) => onWorkDurationChange(Number(e.target.value))}
               className="col-span-3"
             />
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="break-duration" className="text-right">
-              Break
+              Break (min)
             </Label>
             <Input
               id="break-duration"
               type="number"
               value={breakDuration}
-              onChange={(e) => setBreakDuration(Number(e.target.value))}
+              onChange={(e) => onBreakDurationChange(Number(e.target.value))}
               className="col-span-3"
             />
           </div>
