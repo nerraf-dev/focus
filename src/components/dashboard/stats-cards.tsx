@@ -1,16 +1,77 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Clock, CheckCircle2, TrendingUp, Hourglass } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAppContext } from "@/context/app-context";
+import { authenticatedFetch } from "@/lib/api";
+import { useAuth } from "@/context/auth-context";
+
+interface DatabaseTask {
+  id: number;
+  title: string;
+  completed: boolean;
+  description?: string;
+}
+
+interface Session {
+  id: number;
+  taskId: number;
+  startedAt: string;
+  endedAt?: string;
+  duration?: number;
+  task: DatabaseTask;
+}
 
 export function StatsCards() {
-  const { tasks } = useAppContext();
+  const { user } = useAuth();
+  const [tasks, setTasks] = useState<DatabaseTask[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
 
-  const totalTimeSpent = tasks.reduce((acc, task) => acc + task.timeSpent, 0);
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!user) return;
+      
+      try {
+        // Fetch tasks
+        const tasksResponse = await authenticatedFetch('/api/tasks');
+        if (tasksResponse.ok) {
+          const tasksData = await tasksResponse.json();
+          setTasks(tasksData);
+        }
+
+        // Fetch sessions
+        const sessionsResponse = await authenticatedFetch('/api/sessions');
+        if (sessionsResponse.ok) {
+          const sessionsData = await sessionsResponse.json();
+          setSessions(sessionsData);
+        }
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+      }
+    };
+
+    fetchData();
+  }, [user]);
+
+  // Calculate stats from sessions instead of tasks
+  const totalTimeSpent = sessions.reduce((acc, session) => acc + (session.duration || 0), 0);
   const completedTasks = tasks.filter((task) => task.completed).length;
   const totalTasks = tasks.length;
-  const mostTimeSpentOnTask = tasks.reduce((max, task) => task.timeSpent > max.timeSpent ? task : max, tasks[0] || {description: 'N/A', timeSpent: 0});
+
+  // Find task with most session time
+  const taskTimeMap = sessions.reduce((acc, session) => {
+    const taskId = session.taskId;
+    acc[taskId] = (acc[taskId] || 0) + (session.duration || 0);
+    return acc;
+  }, {} as Record<number, number>);
+
+  const mostTimeTaskId = Object.keys(taskTimeMap).reduce((maxId, taskId) => 
+    taskTimeMap[Number(taskId)] > (taskTimeMap[Number(maxId)] || 0) ? taskId : maxId, 
+    Object.keys(taskTimeMap)[0]
+  );
+
+  const mostTimeTask = tasks.find(t => t.id === Number(mostTimeTaskId));
+  const mostTimeSpent = taskTimeMap[Number(mostTimeTaskId)] || 0;
 
   const formatTime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
@@ -31,12 +92,12 @@ export function StatsCards() {
     },
     {
       title: "Top Task",
-      value: mostTimeSpentOnTask.description,
+      value: mostTimeTask?.title || 'No sessions yet',
       icon: <TrendingUp className="h-4 w-4 text-muted-foreground" />,
     },
-     {
-      title: "Time on Top Task",
-      value: formatTime(mostTimeSpentOnTask.timeSpent),
+    {
+      title: "Time on Top Task", 
+      value: formatTime(mostTimeSpent),
       icon: <Hourglass className="h-4 w-4 text-muted-foreground" />,
     },
   ];

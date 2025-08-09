@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,18 +24,46 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { useAppContext } from '@/context/app-context';
+import { authenticatedFetch } from '@/lib/api';
+import { useAuth } from '@/context/auth-context';
 import { Pencil, Trash2 } from 'lucide-react';
-import type { TaskList } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
 
-function EditTaskListDialog({ list }: { list: TaskList }) {
+interface TaskList {
+  id: number;
+  name: string;
+  userId: number;
+}
+
+interface DatabaseTask {
+  id: number;
+  title: string;
+  completed: boolean;
+  listId: number;
+}
+
+function EditTaskListDialog({ list, onUpdate }: { list: TaskList; onUpdate: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(list.name);
-  const { editTaskList } = useAppContext();
+  const { toast } = useToast();
 
-  const handleSubmit = () => {
-    editTaskList(list.id, name);
-    setOpen(false);
+  const handleSubmit = async () => {
+    try {
+      const response = await authenticatedFetch(`/api/task-lists/${list.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name }),
+      });
+
+      if (response.ok) {
+        toast({ title: "List updated successfully" });
+        onUpdate();
+        setOpen(false);
+      } else {
+        throw new Error('Failed to update list');
+      }
+    } catch (error) {
+      toast({ title: "Failed to update list", variant: "destructive" });
+    }
   };
 
   return (
@@ -67,8 +95,25 @@ function EditTaskListDialog({ list }: { list: TaskList }) {
   );
 }
 
-function DeleteTaskListAlert({ listId }: { listId: string }) {
-  const { deleteTaskList } = useAppContext();
+function DeleteTaskListAlert({ listId, onUpdate }: { listId: number; onUpdate: () => void }) {
+  const { toast } = useToast();
+
+  const handleDelete = async () => {
+    try {
+      const response = await authenticatedFetch(`/api/task-lists/${listId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        toast({ title: "List deleted successfully" });
+        onUpdate();
+      } else {
+        throw new Error('Failed to delete list');
+      }
+    } catch (error) {
+      toast({ title: "Failed to delete list", variant: "destructive" });
+    }
+  };
 
   return (
     <AlertDialog>
@@ -87,7 +132,7 @@ function DeleteTaskListAlert({ listId }: { listId: string }) {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => deleteTaskList(listId)}>Delete</AlertDialogAction>
+          <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -95,11 +140,53 @@ function DeleteTaskListAlert({ listId }: { listId: string }) {
 }
 
 export function TaskListManager() {
-  const { taskLists, tasks } = useAppContext();
+  const { user } = useAuth();
+  const [taskLists, setTaskLists] = useState<TaskList[]>([]);
+  const [tasks, setTasks] = useState<DatabaseTask[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const getTaskCount = (listId: string) => {
+  const fetchData = async () => {
+    if (!user) return;
+    
+    try {
+      const [listsResponse, tasksResponse] = await Promise.all([
+        authenticatedFetch('/api/task-lists'),
+        authenticatedFetch('/api/tasks')
+      ]);
+
+      if (listsResponse.ok) {
+        const listsData = await listsResponse.json();
+        setTaskLists(listsData);
+      }
+
+      if (tasksResponse.ok) {
+        const tasksData = await tasksResponse.json();
+        setTasks(tasksData);
+      }
+    } catch (error) {
+      console.error('Failed to fetch task lists:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [user]);
+
+  const getTaskCount = (listId: number) => {
     return tasks.filter((task) => task.listId === listId).length;
   };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-8">
+          <p className="text-center text-muted-foreground">Loading task lists...</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -121,8 +208,8 @@ export function TaskListManager() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <EditTaskListDialog list={list} />
-                <DeleteTaskListAlert listId={list.id} />
+                <EditTaskListDialog list={list} onUpdate={fetchData} />
+                <DeleteTaskListAlert listId={list.id} onUpdate={fetchData} />
               </div>
             </div>
           ))}
