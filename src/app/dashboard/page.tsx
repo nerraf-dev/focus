@@ -50,37 +50,36 @@ export default function DashboardPage() {
     );
   }
 
-  if (!hasData) {
-    return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Welcome to your Dashboard</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <p className="text-muted-foreground">
-                    You don't have any task data yet. Go to the timer, add some tasks, and track your focus sessions to see your analytics here.
-                </p>
-            </CardContent>
-        </Card>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-8">
-      <StatsCards />
-      <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-7">
-        <Card className="col-span-1 lg:col-span-4">
+      {!hasData && (
+        <Card>
           <CardHeader>
-            <CardTitle>Time Allocation</CardTitle>
+            <CardTitle>Welcome to your Dashboard</CardTitle>
           </CardHeader>
-          <CardContent className="pl-2">
-            <TimeChart />
+          <CardContent>
+            <p className="text-muted-foreground">
+              You don't have any task data yet. Go to the timer, add some tasks, and track your focus sessions to see your analytics here.
+            </p>
           </CardContent>
         </Card>
-        <div className="col-span-1 lg:col-span-3">
-          <FocusInsights />
+      )}
+      {hasData && <StatsCards />}
+      {hasData && (
+        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-7">
+          <Card className="col-span-1 lg:col-span-4">
+            <CardHeader>
+              <CardTitle>Time Allocation</CardTitle>
+            </CardHeader>
+            <CardContent className="pl-2">
+              <TimeChart />
+            </CardContent>
+          </Card>
+          <div className="col-span-1 lg:col-span-3">
+            <FocusInsights />
+          </div>
         </div>
-      </div>
+      )}
       <div>
         <TaskListManager />
       </div>
