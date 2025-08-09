@@ -75,6 +75,10 @@ const CircularProgress = ({
 };
 
 export function TimerDisplay() {
+  // Manual refresh handler
+  const refreshTasksHandler = () => {
+    setRefreshTasks((prev) => prev + 1);
+  };
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -97,34 +101,36 @@ export function TimerDisplay() {
   }, []);
 
   // Load tasks and restore active task
-  useEffect(() => {
-    const fetchTasks = async () => {
-      if (!user) return;
-      try {
-        const response = await authenticatedFetch('/api/tasks');
-        if (response.ok) {
-          const data = await response.json();
-          setTasks(data);
-          // Restore active task from localStorage if possible
-          const storedActiveTaskId = localStorage.getItem("focusflow-active-task-id");
-          if (storedActiveTaskId) {
-            const foundTask = data.find((task: DatabaseTask) => task.id === parseInt(storedActiveTaskId));
-            if (foundTask && !foundTask.completed) {
-              setActiveTask(foundTask);
-              return;
-            }
-          }
-          // If no active task, set first incomplete task
-          if (!activeTask) {
-            const firstIncomplete = data.find((task: DatabaseTask) => !task.completed);
-            if (firstIncomplete) setActiveTask(firstIncomplete);
+  // Fetch tasks function for instant refresh
+  const fetchTasks = async () => {
+    if (!user) return;
+    try {
+      const response = await authenticatedFetch('/api/tasks');
+      if (response.ok) {
+        const data = await response.json();
+        setTasks(data);
+        // Restore active task from localStorage if possible
+        const storedActiveTaskId = localStorage.getItem("focusflow-active-task-id");
+        if (storedActiveTaskId) {
+          const foundTask = data.find((task: DatabaseTask) => task.id === parseInt(storedActiveTaskId));
+          if (foundTask && !foundTask.completed) {
+            setActiveTask(foundTask);
+            return;
           }
         }
-      } catch (error) {
-        console.error('Failed to fetch tasks:', error);
-        toast({ title: "Failed to load tasks", variant: "destructive" });
+        // If no active task, set first incomplete task
+        if (!activeTask) {
+          const firstIncomplete = data.find((task: DatabaseTask) => !task.completed);
+          if (firstIncomplete) setActiveTask(firstIncomplete);
+        }
       }
-    };
+    } catch (error) {
+      console.error('Failed to fetch tasks:', error);
+      toast({ title: "Failed to load tasks", variant: "destructive" });
+    }
+  };
+
+  useEffect(() => {
     fetchTasks();
     const interval = setInterval(fetchTasks, 10000);
     return () => clearInterval(interval);
@@ -237,7 +243,7 @@ export function TimerDisplay() {
           </div>
         </div>
         
-        {/* Task Selection */}
+        {/* Task Selection + Manual Refresh */}
         {mode === "work" && (
           <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -249,6 +255,9 @@ export function TimerDisplay() {
               activeTask={activeTask}
               onTaskSelect={setActiveTask}
             />
+            <Button variant="outline" size="sm" className="ml-2" onClick={refreshTasksHandler}>
+              Refresh
+            </Button>
           </div>
         )}
       </CardHeader>
