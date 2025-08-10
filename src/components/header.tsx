@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, LayoutDashboard, Timer as TimerIcon, LogIn, LogOut, User, Menu, X } from "lucide-react";
+import { BrainCircuit, LayoutDashboard, Timer as TimerIcon, LogIn, LogOut, User, Menu, X, Play, Pause } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
+import { useTimer } from "@/context/timer-context";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -38,7 +39,15 @@ const NavLink = ({ href, children, icon: Icon }: { href: string; children: React
 
 export function Header() {
   const { user, logout, loading } = useAuth();
+  const { isActive, mode, secondsLeft, activeTask } = useTimer();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Format time helper for mini display
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6">
@@ -126,6 +135,28 @@ export function Header() {
           <span className="font-headline text-xl">FocusFlow</span>
         </Link>
         <div className="flex-1" />
+        
+        {/* Mini Timer Indicator */}
+        {user && isActive && (
+          <div className="flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full text-sm">
+            {isActive ? (
+              <Pause className="h-3 w-3 text-primary" />
+            ) : (
+              <Play className="h-3 w-3 text-muted-foreground" />
+            )}
+            <span className={cn("font-mono", isActive ? "text-primary" : "text-muted-foreground")}>
+              {formatTime(secondsLeft)}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {mode === 'work' ? 'Work' : 'Break'}
+            </span>
+            {mode === 'work' && activeTask && (
+              <span className="text-xs text-muted-foreground max-w-[120px] truncate">
+                · {activeTask.title}
+              </span>
+            )}
+          </div>
+        )}
         
         {user && (
           <>
