@@ -1,6 +1,6 @@
 "use client";
 
-import { TimerDisplay } from "@/components/timer/timer-display";
+import { TimerDisplay } from "@/components/timer/timer-display-context";
 import { TaskManager } from "@/components/tasks/task-manager";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
